@@ -1,3 +1,8 @@
+"""
+app.py
+Streamlit web application for the AI Agritech Content Pipeline.
+"""
+
 import streamlit as st
 import asyncio
 import random
@@ -86,10 +91,11 @@ async def run_pipeline_async(topic: str, api_key: str):
         # 2. Create a unique session ID for this run
         session_id = f"streamlit_session_{uuid.uuid4().hex[:8]}"
         
-        # 3. Create the session explicitly before running
+        # 3. Create the session explicitly before running with required app_name
         await session_service.create_session(
             user_id="streamlit_user",
-            session_id=session_id
+            session_id=session_id,
+            app_name="ai_agritech_content_pipeline"  # Required parameter
         )
         
         # 4. Prepare the input as a Content object
