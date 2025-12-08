@@ -18,7 +18,7 @@ def create_research_agent(api_key: str) -> Agent:
     research_agent = Agent(
         name="research_agent",
         model=Gemini(
-            model="gemini-2.0-flash",  # Using 2.0-flash as per our working setup
+            model="gemini-2.5-flash-lite",  # Using 2.0-flash as per our working setup
             retry_options=retry_config,
             api_key=api_key  # Critical: The API key is passed here
         ),
