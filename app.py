@@ -3,6 +3,7 @@ import asyncio
 import random
 import nest_asyncio
 from google.genai import types
+import uuid
 
 # Import the workflow assembly function
 from core.workflow import create_content_workflow
@@ -78,40 +79,60 @@ async def run_pipeline_async(topic: str, api_key: str):
     Async function to execute the complete content pipeline.
     This is the bridge between Streamlit (sync) and the ADK pipeline (async).
     """
-    # 1. Create the workflow runner using the API key from secrets
-    runner, session_service = create_content_workflow(api_key)
+    try:
+        # 1. Create the workflow runner using the API key from secrets
+        runner, session_service = create_content_workflow(api_key)
+        
+        # 2. Create a unique session ID for this run
+        session_id = f"streamlit_session_{uuid.uuid4().hex[:8]}"
+        
+        # 3. Create the session explicitly before running
+        await session_service.create_session(
+            user_id="streamlit_user",
+            session_id=session_id
+        )
+        
+        # 4. Prepare the input as a Content object
+        query = f"Research and create a LinkedIn post about: {topic}"
+        content = types.Content(role='user', parts=[types.Part(text=query)])
+        
+        # 5. Execute the pipeline and collect all events
+        all_events = []
+        async for event in runner.run_async(
+            user_id="streamlit_user",
+            session_id=session_id,
+            new_message=content
+        ):
+            all_events.append(event)
+        
+        # 6. Extract the final response from the events
+        final_response = None
+        for event in reversed(all_events):
+            if hasattr(event, 'is_final_response') and event.is_final_response():
+                if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                    for part in event.content.parts:
+                        if hasattr(part, 'text') and part.text:
+                            final_response = part.text
+                            break
+                break
+        
+        # 7. Clean and return the final post
+        if final_response:
+            return clean_agent_response(final_response)
+        return None
     
-    # 2. Create a unique session ID for this run
-    random_session_id = f"streamlit_session_{random.randint(1000, 9999)}"
-    
-    # 3. Prepare the input as a Content object
-    query = f"Research and create a LinkedIn post about: {topic}"
-    content = types.Content(role='user', parts=[types.Part(text=query)])
-    
-    # 4. Execute the pipeline and collect all events
-    all_events = []
-    async for event in runner.run_async(
-        user_id="streamlit_user",
-        session_id=random_session_id,
-        new_message=content
-    ):
-        all_events.append(event)
-    
-    # 5. Extract the final response from the events
-    final_response = None
-    for event in reversed(all_events):
-        if hasattr(event, 'is_final_response') and event.is_final_response():
-            if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
-                for part in event.content.parts:
-                    if hasattr(part, 'text') and part.text:
-                        final_response = part.text
-                        break
-            break
-    
-    # 6. Clean and return the final post
-    if final_response:
-        return clean_agent_response(final_response)
-    return None
+    except Exception as e:
+        st.error(f"Error in pipeline execution: {str(e)}")
+        raise
+    finally:
+        # Optional: Clean up the session
+        try:
+            await session_service.delete_session(
+                user_id="streamlit_user",
+                session_id=session_id
+            )
+        except:
+            pass  # Ignore cleanup errors
 
 # ==================== HANDLE BUTTON CLICK ====================
 if generate_button:
@@ -155,11 +176,11 @@ if generate_button:
                 
         except Exception as e:
             status.update(label="❌ **Pipeline Execution Failed**", state="error")
-            st.exception(e)  # Display the full error traceback
+            st.error(f"Error: {str(e)}")
 
 # ==================== FOOTER ====================
 st.divider()
 st.caption("""
     Built with Google's Agent Development Kit (ADK) & Streamlit.  
-    The pipeline uses Gemini 2.5 flash lite for AI and Google Search for research.
+    The pipeline uses Gemini 2.0 Flash for AI and Google Search for research.
 """)
