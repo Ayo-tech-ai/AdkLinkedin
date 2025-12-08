@@ -161,5 +161,5 @@ if generate_button:
 st.divider()
 st.caption("""
     Built with Google's Agent Development Kit (ADK) & Streamlit.  
-    The pipeline uses Gemini 2.0 Flash for AI and Google Search for research.
+    The pipeline uses Gemini 2.5 flash lite for AI and Google Search for research.
 """)
