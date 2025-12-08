@@ -17,7 +17,7 @@ def create_editor_agent(api_key: str) -> Agent:
     editor_agent = Agent(
         name="editor_agent",
         model=Gemini(
-            model="gemini-2.0-flash",  # Consistent with other agents
+            model="gemini-2.5-flash-lite",  # Consistent with other agents
             retry_options=retry_config,
             api_key=api_key  # API key passed here
         ),
