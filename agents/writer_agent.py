@@ -17,7 +17,7 @@ def create_writer_agent(api_key: str) -> Agent:
     writer_agent = Agent(
         name="writer_agent",
         model=Gemini(
-            model="gemini-2.0-flash",  # Consistent with research_agent
+            model="gemini-2.5-flash-lite",  # Consistent with research_agent
             retry_options=retry_config,
             api_key=api_key  # API key passed here
         ),
