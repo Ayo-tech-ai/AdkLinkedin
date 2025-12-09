@@ -1,19 +1,14 @@
-"""
-app.py
-Streamlit web application for the AI Agritech Content Pipeline.
-"""
-
 import streamlit as st
 import asyncio
-import random
 import nest_asyncio
-from google.genai import types
-import uuid
+import os
 
-# Import the workflow assembly function
-from core.workflow import create_content_workflow
-# Import the helper function to clean the final output
+# Import the workflow
+from core.workflow import create_content_pipeline
 from core.config import clean_agent_response
+
+# Apply nest_asyncio
+nest_asyncio.apply()
 
 # ==================== STREAMLIT PAGE CONFIG ====================
 st.set_page_config(
@@ -21,9 +16,6 @@ st.set_page_config(
     page_icon="🌾",
     layout="wide"
 )
-
-# Apply nest_asyncio to allow async execution within Streamlit
-nest_asyncio.apply()
 
 # ==================== APP TITLE & DESCRIPTION ====================
 st.title("🌾 AI Agritech Content Pipeline")
@@ -47,6 +39,13 @@ with st.sidebar:
         help="Example: 'Machine learning for crop yield prediction'"
     )
     
+    # API Key input
+    api_key = st.text_input(
+        "Enter Gemini API Key:",
+        type="password",
+        help="Get from https://aistudio.google.com/app/apikeys"
+    )
+    
     # Generate button
     generate_button = st.button(
         "🚀 Generate LinkedIn Post",
@@ -63,11 +62,9 @@ with st.sidebar:
     """)
 
 # ==================== MAIN CONTENT AREA ====================
-# Initialize session state for the final result
 if "final_post" not in st.session_state:
     st.session_state.final_post = None
 
-# Display the final post from a previous run if it exists
 if st.session_state.final_post:
     st.header("📄 Your Generated LinkedIn Post")
     st.text_area(
@@ -81,104 +78,58 @@ if st.session_state.final_post:
 # ==================== PIPELINE EXECUTION LOGIC ====================
 async def run_pipeline_async(topic: str, api_key: str):
     """
-    Async function to execute the complete content pipeline.
-    This is the bridge between Streamlit (sync) and the ADK pipeline (async).
+    Execute the content pipeline using InMemoryRunner.
     """
     try:
-        # 1. Create the workflow runner using the API key from secrets
-        runner, session_service = create_content_workflow(api_key)
+        # Set API key
+        os.environ["GOOGLE_API_KEY"] = api_key
         
-        # 2. Create a unique session ID for this run
-        session_id = f"streamlit_session_{uuid.uuid4().hex[:8]}"
+        # Import ADK components
+        from google.adk.runners import InMemoryRunner
         
-        # 3. Create the session explicitly before running with required app_name
-        await session_service.create_session(
-            user_id="streamlit_user",
-            session_id=session_id,
-            app_name="ai_agritech_content_pipeline"  # Required parameter
-        )
+        # Create the pipeline
+        workflow_agent = create_content_pipeline()
         
-        # 4. Prepare the input as a Content object
+        # Create runner with search tools
+        runner = InMemoryRunner(agent=workflow_agent)
+        
+        # Execute the pipeline
         query = f"Research and create a LinkedIn post about: {topic}"
-        content = types.Content(role='user', parts=[types.Part(text=query)])
+        result = await runner.run_debug(query)
         
-        # 5. Execute the pipeline and collect all events
-        all_events = []
-        async for event in runner.run_async(
-            user_id="streamlit_user",
-            session_id=session_id,
-            new_message=content
-        ):
-            all_events.append(event)
-        
-        # 6. Extract the final response from the events
-        final_response = None
-        for event in reversed(all_events):
-            if hasattr(event, 'is_final_response') and event.is_final_response():
-                if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
-                    for part in event.content.parts:
-                        if hasattr(part, 'text') and part.text:
-                            final_response = part.text
-                            break
-                break
-        
-        # 7. Clean and return the final post
-        if final_response:
-            return clean_agent_response(final_response)
+        # Clean and return result
+        if result:
+            return clean_agent_response(result)
         return None
-    
+        
     except Exception as e:
-        st.error(f"Error in pipeline execution: {str(e)}")
+        st.error(f"Pipeline error: {str(e)}")
         raise
-    finally:
-        # Optional: Clean up the session
-        try:
-            await session_service.delete_session(
-                user_id="streamlit_user",
-                session_id=session_id
-            )
-        except:
-            pass  # Ignore cleanup errors
 
 # ==================== HANDLE BUTTON CLICK ====================
 if generate_button:
-    # Validate input
     if not topic.strip():
         st.error("Please enter a topic.")
         st.stop()
     
-    # Check for API key in secrets
-    if "GOOGLE_API_KEY" not in st.secrets:
-        st.error("""
-        **API Key Missing.**  
-        Please add your Gemini API key to `.streamlit/secrets.toml` file:
-        ```
-        GOOGLE_API_KEY = "YOUR_ACTUAL_API_KEY_HERE"
-        ```
-        """)
+    if not api_key:
+        st.error("Please enter your Gemini API key.")
         st.stop()
     
-    # Get the API key from Streamlit secrets
-    api_key = st.secrets["GOOGLE_API_KEY"]
-    
-    # Display a status container for the pipeline run
     with st.status("🤖 **Running AI Pipeline...** This will take 1-2 minutes.", expanded=True) as status:
         st.write("1. **Researching** the topic...")
         st.write("2. **Writing** the first draft...")
-        st.write("3. **Verifying & editing** the draft (this is the iterative loop)...")
+        st.write("3. **Verifying & editing** the draft...")
         
         try:
-            # Execute the async pipeline using asyncio.run()
             final_post = asyncio.run(run_pipeline_async(topic, api_key))
             
             if final_post:
-                # Update session state with the result
                 st.session_state.final_post = final_post
                 status.update(label="✅ **Pipeline Complete!**", state="complete", expanded=False)
-                st.rerun()  # Rerun the app to display the new post
+                st.rerun()
             else:
-                status.update(label="❌ **Pipeline completed but no output was generated.**", state="error")
-                st.error("The pipeline ran but did not return a post. Check the logs for errors.")
+                status.update(label="❌ **No output generated.**", state="error")
                 
         except Exception as e:
             status.update(label="❌ **Pipeline Execution Failed**", state="error")
