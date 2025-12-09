@@ -1,8 +1,11 @@
+"""
+workflow.py
+Creates and assembles the agriculture content workflow.
+"""
+
 from google.adk.agents import Agent
 from google.adk.models.google_llm import Gemini
 from google.adk.tools import google_search
-from google.genai import types
-import asyncio
 
 def create_researcher_agent():
     """Create the research agent."""
@@ -33,88 +36,35 @@ def create_verifier_agent():
         tools=[google_search],
     )
 
-def create_agriculture_workflow(researcher, writer, verifier):
+def create_master_agent():
     """
-    Assemble the complete workflow with the three agents.
-    This function defines how agents interact.
+    Create a master agent that orchestrates the entire workflow.
+    This agent coordinates between researcher, writer, and verifier.
     """
-    # Define the workflow logic
-    @researcher.on_response
-    async def research_to_writer(ctx, response):
-        """Pass research results to writer."""
-        research_summary = response.text
-        
-        # Prepare query for writer
-        writer_query = f"""Based on this research, create a professional LinkedIn post:
+    return Agent(
+        name="agriculture_content_master",
+        model=Gemini(model="gemini-2.0-flash-exp"),
+        description="Master agent for agriculture content pipeline",
+        instruction="""You are the master coordinator for creating agriculture AI LinkedIn posts.
 
-Research Summary:
-{research_summary}
+Your workflow:
+1. RESEARCH PHASE: Search for current information about the given agriculture/AI topic. Find statistics, case studies, and recent developments.
+2. WRITING PHASE: Create a professional LinkedIn post based on the research. Include:
+   - Engaging hook
+   - Key insights
+   - Practical applications
+   - Future outlook
+   - Relevant hashtags
+3. VERIFICATION PHASE: Fact-check the post for accuracy. Verify claims, statistics, and information.
+4. ITERATION: If corrections are needed, rewrite the post to address them.
 
-Create a LinkedIn post with:
-1. Engaging hook
-2. Key insights from research
-3. Practical applications
-4. Future outlook
-5. Relevant hashtags"""
-        
-        # Call writer agent
-        writer_response = await writer.respond(ctx, writer_query)
-        return writer_response
-
-    @writer.on_response
-    async def writer_to_verifier(ctx, response):
-        """Pass draft to verifier."""
-        draft_content = response.text
-        
-        # Prepare query for verifier
-        verifier_query = f"""Verify the accuracy of this LinkedIn post draft:
-
-Draft:
-{draft_content}
-
-Check for:
-1. Factual accuracy
-2. Supported claims
-3. Up-to-date information
-4. Any exaggerations or unsupported statements"""
-        
-        # Call verifier agent
-        verifier_response = await verifier.respond(ctx, verifier_query)
-        return verifier_response
-
-    @verifier.on_response
-    async def verifier_feedback(ctx, response):
-        """Handle verification feedback."""
-        verification_report = response.text
-        
-        # Check if verification passed
-        if "accurate" in verification_report.lower() or "correct" in verification_report.lower():
-            return response  # Return final response
-        
-        # If corrections needed, rewrite
-        rewrite_query = f"""Rewrite the LinkedIn post incorporating these corrections:
-
-Corrections Needed:
-{verification_report}
-
-Please revise the post to address all verification issues."""
-        
-        rewrite_response = await writer.respond(ctx, rewrite_query)
-        return rewrite_response
-
-    return researcher  # Return the entry point agent
+Execute this complete workflow for the given topic. Return only the final LinkedIn post.""",
+        tools=[google_search],
+    )
 
 def create_content_pipeline():
     """
-    Create and return the complete content pipeline using InMemoryRunner.
-    This is the main entry point for the pipeline.
+    Create and return the complete content pipeline.
+    For simplicity, we'll use a single master agent that handles the entire workflow.
     """
-    # Create agents
-    researcher = create_researcher_agent()
-    writer = create_writer_agent()
-    verifier = create_verifier_agent()
-    
-    # Assemble workflow
-    workflow = create_agriculture_workflow(researcher, writer, verifier)
-    
-    return workflow
+    return create_master_agent()
