@@ -1,73 +1,120 @@
-from google.adk.agents import LoopAgent, SequentialAgent
-from google.adk import Runner
-from google.adk.sessions import InMemorySessionService
+from google.adk.agents import Agent
+from google.adk.models.google_llm import Gemini
+from google.adk.tools import google_search
+from google.genai import types
+import asyncio
 
-# Import the agent factory functions
-from agents.research_agent import create_research_agent
-from agents.writer_agent import create_writer_agent
-from agents.verifier_agent import create_verifier_agent
-from agents.editor_agent import create_editor_agent
+def create_researcher_agent():
+    """Create the research agent."""
+    return Agent(
+        name="researcher",
+        model=Gemini(model="gemini-2.0-flash-exp"),
+        description="Research specialist for gathering agricultural AI information",
+        instruction="""You are a research specialist. Use Google Search to find current, accurate information about AI applications in agriculture. Focus on finding reliable sources, statistics, case studies, and recent developments. Return well-structured research notes with citations.""",
+        tools=[google_search],
+    )
 
-def create_content_workflow(api_key: str):
+def create_writer_agent():
+    """Create the content writer agent."""
+    return Agent(
+        name="writer",
+        model=Gemini(model="gemini-2.0-flash-exp"),
+        description="Professional content writer for LinkedIn posts",
+        instruction="""You are a professional content writer specializing in LinkedIn posts. Create engaging, professional content about AI in agriculture. Format for LinkedIn with proper spacing, emojis, and hashtags. Keep it concise (300-500 words), engaging, and suitable for professionals in tech and agriculture.""",
+    )
+
+def create_verifier_agent():
+    """Create the fact-checking agent."""
+    return Agent(
+        name="verifier",
+        model=Gemini(model="gemini-2.0-flash-exp"),
+        description="Fact-checker for agricultural AI content",
+        instruction="""You are a fact-checking specialist. Verify the accuracy of information about AI in agriculture. Cross-reference with known facts and research. Identify any claims that need verification or clarification. Return a verification report with any corrections needed.""",
+        tools=[google_search],
+    )
+
+def create_agriculture_workflow(researcher, writer, verifier):
     """
-    Creates and returns the complete agent workflow (SequentialAgent) and its runner.
-    
-    This function:
-    1. Creates all four individual agents using the provided API key.
-    2. Puts the Verifier and Editor into a LoopAgent (refinement loop).
-    3. Chains Research -> Writer -> Loop into a SequentialAgent (main pipeline).
-    4. Creates a Runner and SessionService for the pipeline.
-    
-    Args:
-        api_key (str): The Gemini API key to configure all agents.
-    
-    Returns:
-        tuple: (runner, session_service) - The runner to execute the pipeline and its session service.
+    Assemble the complete workflow with the three agents.
+    This function defines how agents interact.
     """
-    # 1. Create all four agents using the shared API key
-    print("   [1/4] Creating Research Agent...")
-    research_agent = create_research_agent(api_key)
-    
-    print("   [2/4] Creating Writer Agent...")
-    writer_agent = create_writer_agent(api_key)
-    
-    print("   [3/4] Creating Verifier Agent...")
-    verifier_agent = create_verifier_agent(api_key)
-    
-    print("   [4/4] Creating Editor Agent...")
-    editor_agent = create_editor_agent(api_key)
-    
-    # 2. Create the refinement loop (Verifier <-> Editor)
-    print("   Building Refinement Loop...")
-    refinement_loop = LoopAgent(
-        name="refinement_loop",
-        sub_agents=[verifier_agent, editor_agent],
-        max_iterations=3,
-        description="Iteratively verifies and edits content until approved or max iterations reached."
-    )
-    
-    # 3. Create the main sequential pipeline
-    print("   Assembling Main Pipeline...")
-    content_workflow = SequentialAgent(
-        name="linkedin_pipeline",
-        sub_agents=[research_agent, writer_agent, refinement_loop],
-        description="1. Researches topic -> 2. Writes first draft -> 3. Iteratively refines draft"
-    )
-    
-    # 4. Create the runner and session service
-    print("   Configuring Runner...")
-    session_service = InMemorySessionService()
-    runner = Runner(
-        agent=content_workflow,
-        app_name="ai_agriculture_content",
-        session_service=session_service
-    )
-    
-    print("✅ Pipeline assembly complete.")
-    return runner, session_service
+    # Define the workflow logic
+    @researcher.on_response
+    async def research_to_writer(ctx, response):
+        """Pass research results to writer."""
+        research_summary = response.text
+        
+        # Prepare query for writer
+        writer_query = f"""Based on this research, create a professional LinkedIn post:
 
-# Optional: Test code if run directly (requires API key)
-if __name__ == "__main__":
-    print("🏗️  Workflow assembly module loaded.")
-    print("   To create the pipeline, call: runner, session_service = create_content_workflow(api_key='YOUR_KEY')")
-    print("   WARNING: Running this directly will make actual API calls if a valid key is provided.")
+Research Summary:
+{research_summary}
+
+Create a LinkedIn post with:
+1. Engaging hook
+2. Key insights from research
+3. Practical applications
+4. Future outlook
+5. Relevant hashtags"""
+        
+        # Call writer agent
+        writer_response = await writer.respond(ctx, writer_query)
+        return writer_response
+
+    @writer.on_response
+    async def writer_to_verifier(ctx, response):
+        """Pass draft to verifier."""
+        draft_content = response.text
+        
+        # Prepare query for verifier
+        verifier_query = f"""Verify the accuracy of this LinkedIn post draft:
+
+Draft:
+{draft_content}
+
+Check for:
+1. Factual accuracy
+2. Supported claims
+3. Up-to-date information
+4. Any exaggerations or unsupported statements"""
+        
+        # Call verifier agent
+        verifier_response = await verifier.respond(ctx, verifier_query)
+        return verifier_response
+
+    @verifier.on_response
+    async def verifier_feedback(ctx, response):
+        """Handle verification feedback."""
+        verification_report = response.text
+        
+        # Check if verification passed
+        if "accurate" in verification_report.lower() or "correct" in verification_report.lower():
+            return response  # Return final response
+        
+        # If corrections needed, rewrite
+        rewrite_query = f"""Rewrite the LinkedIn post incorporating these corrections:
+
+Corrections Needed:
+{verification_report}
+
+Please revise the post to address all verification issues."""
+        
+        rewrite_response = await writer.respond(ctx, rewrite_query)
+        return rewrite_response
+
+    return researcher  # Return the entry point agent
+
+def create_content_pipeline():
+    """
+    Create and return the complete content pipeline using InMemoryRunner.
+    This is the main entry point for the pipeline.
+    """
+    # Create agents
+    researcher = create_researcher_agent()
+    writer = create_writer_agent()
+    verifier = create_verifier_agent()
+    
+    # Assemble workflow
+    workflow = create_agriculture_workflow(researcher, writer, verifier)
+    
+    return workflow
